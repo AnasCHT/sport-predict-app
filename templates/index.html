@@ -1,0 +1,16 @@
+<!DOCTYPE html>
+<html>
+  <body>
+    <h1>Sport-Type Image Classifier</h1>
+    <form method="POST">
+      <label>Image URL:</label>
+      <input type="text" name="image_url" placeholder="https://...">
+      <button type="submit">Analyze</button>
+    </form>
+
+    {% if prediction %}
+      <h2>Predicted sport: {{ prediction }}</h2>
+      <p>Confidence: {{ (score * 100)|round(2) }} %</p>
+    {% endif %}
+  </body>
+</html>

@@ -1,0 +1,118 @@
+from flask import Flask, render_template, request
+import requests
+import os
+from azure.storage.blob import BlobServiceClient
+from datetime import datetime
+
+
+app = Flask(__name__)
+
+
+SUBSCRIPTION_KEY = os.environ.get("CV_SUBSCRIPTION_KEY")
+
+ENDPOINT = os.environ.get("CV_ENDPOINT")
+
+ANALYZE_URL = ENDPOINT.rstrip("/") + "/vision/v3.2/analyze"
+
+STORAGE_CONNECTION_STRING = os.environ.get("STORAGE_CONNECTION_STRING")
+STORAGE_CONTAINER_NAME = os.environ.get("STORAGE_CONTAINER_NAME", "logs")
+
+blob_service_client = None
+blob_container_client = None
+
+if STORAGE_CONNECTION_STRING and STORAGE_CONTAINER_NAME:
+    try:
+        blob_service_client = BlobServiceClient.from_connection_string(STORAGE_CONNECTION_STRING)
+        blob_container_client = blob_service_client.get_container_client(STORAGE_CONTAINER_NAME)
+    except Exception as e:
+        # Optional: print/ignore, we don't want the app to crash if logging fails
+        print(f"Error initializing Blob Storage client: {e}")
+
+def log_prediction_to_blob(image_url, prediction, score):
+    """Append a log line to a text blob in Azure Blob Storage."""
+    global blob_container_client
+
+    if not blob_container_client:
+        return  # logging is optional; don't crash if storage not configured
+
+    try:
+        timestamp = datetime.utcnow().isoformat()
+        line = f"{timestamp},{image_url},{prediction},{score}\n"
+
+        blob_name = "predictions.log"
+
+        # Download existing content (if any)
+        try:
+            existing_blob = blob_container_client.download_blob(blob_name).readall().decode("utf-8")
+        except Exception:
+            existing_blob = ""
+
+        # Upload updated content
+        new_content = existing_blob + line
+        blob_container_client.upload_blob(
+            name=blob_name,
+            data=new_content,
+            overwrite=True
+        )
+    except Exception as e:
+        print(f"Error logging to blob: {e}")
+
+
+def predict_sport_from_tags(tags):
+    SPORT_KEYWORDS = {
+        "Football": ["soccer", "football", "football player", "soccer ball"],
+        "Basketball": ["basketball", "basketball player", "basketball court"],
+        "Tennis": ["tennis", "tennis racket", "tennis court"],
+        "Swimming": ["swimming", "swimmer", "swimming pool"],
+        "Athletics": ["running", "runner", "track", "athletics"],
+    }
+    scores = {sport: 0.0 for sport in SPORT_KEYWORDS}
+    for tag in tags:
+        name = tag["name"].lower()
+        conf = tag.get("confidence", 0.0)
+        for sport, keywords in SPORT_KEYWORDS.items():
+            if name in keywords:
+                scores[sport] = max(scores[sport], conf)
+    best_sport = max(scores, key=scores.get)
+    return best_sport, scores[best_sport], scores
+
+@app.route("/", methods=["GET", "POST"])
+def index():
+    error = None
+    prediction = None
+    score = None
+
+    if not SUBSCRIPTION_KEY or not ANALYZE_URL:
+        error = "Computer Vision credentials are not configured correctly."
+        return render_template("index.html", prediction=prediction, score=score, error=error)
+
+    if request.method == "POST":
+        image_url = request.form.get("image_url")
+
+        try:
+            params = {"visualFeatures": "Tags,Description,Objects", "language": "en"}
+            headers = {
+                "Ocp-Apim-Subscription-Key": SUBSCRIPTION_KEY,
+                "Content-Type": "application/json"
+            }
+            data = {"url": image_url}
+
+            response = requests.post(ANALYZE_URL, headers=headers, params=params, json=data)
+            response.raise_for_status()
+            result = response.json()
+
+            tags = result.get("tags", [])
+            prediction, score, all_scores = predict_sport_from_tags(tags)
+
+            # 👉 Log to Azure Blob
+            log_prediction_to_blob(image_url, prediction, score)
+
+        except Exception as e:
+            error = f"Error while calling Computer Vision API: {e}"
+
+    return render_template("index.html", prediction=prediction, score=score, error=error)
+
+
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=8080, debug=True)
