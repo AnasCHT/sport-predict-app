@@ -4,16 +4,25 @@ import os
 from azure.storage.blob import BlobServiceClient
 from datetime import datetime
 
-
 app = Flask(__name__)
 
-
-SUBSCRIPTION_KEY = os.environ.get("CV_SUBSCRIPTION_KEY")
-
+# ---- Computer Vision config ----
+# In Azure App Service → Configuration:
+#   CV_KEY = <your key>
+#   CV_ENDPOINT = https://<your-resource>.cognitiveservices.azure.com/
+SUBSCRIPTION_KEY = os.environ.get("CV_KEY")
 ENDPOINT = os.environ.get("CV_ENDPOINT")
 
-ANALYZE_URL = ENDPOINT.rstrip("/") + "/vision/v3.2/analyze"
+if ENDPOINT:
+    ENDPOINT = ENDPOINT.rstrip("/")
+    ANALYZE_URL = ENDPOINT + "/vision/v3.2/analyze"
+else:
+    ANALYZE_URL = None
 
+# ---- Blob Storage config ----
+# In Azure App Service → Configuration:
+#   STORAGE_CONNECTION_STRING = <connection string>
+#   STORAGE_CONTAINER_NAME = logs
 STORAGE_CONNECTION_STRING = os.environ.get("STORAGE_CONNECTION_STRING")
 STORAGE_CONTAINER_NAME = os.environ.get("STORAGE_CONTAINER_NAME", "logs")
 
@@ -25,8 +34,8 @@ if STORAGE_CONNECTION_STRING and STORAGE_CONTAINER_NAME:
         blob_service_client = BlobServiceClient.from_connection_string(STORAGE_CONNECTION_STRING)
         blob_container_client = blob_service_client.get_container_client(STORAGE_CONTAINER_NAME)
     except Exception as e:
-        # Optional: print/ignore, we don't want the app to crash if logging fails
         print(f"Error initializing Blob Storage client: {e}")
+
 
 def log_prediction_to_blob(image_url, prediction, score):
     """Append a log line to a text blob in Azure Blob Storage."""
@@ -38,7 +47,6 @@ def log_prediction_to_blob(image_url, prediction, score):
     try:
         timestamp = datetime.utcnow().isoformat()
         line = f"{timestamp},{image_url},{prediction},{score}\n"
-
         blob_name = "predictions.log"
 
         # Download existing content (if any)
@@ -47,7 +55,6 @@ def log_prediction_to_blob(image_url, prediction, score):
         except Exception:
             existing_blob = ""
 
-        # Upload updated content
         new_content = existing_blob + line
         blob_container_client.upload_blob(
             name=blob_name,
@@ -76,18 +83,23 @@ def predict_sport_from_tags(tags):
     best_sport = max(scores, key=scores.get)
     return best_sport, scores[best_sport], scores
 
+
 @app.route("/", methods=["GET", "POST"])
 def index():
     error = None
     prediction = None
     score = None
 
+    # Debug print to Azure Log Stream
+    print("Request method:", request.method)
+
     if not SUBSCRIPTION_KEY or not ANALYZE_URL:
-        error = "Computer Vision credentials are not configured correctly."
+        error = "Computer Vision credentials are not configured correctly on the server."
         return render_template("index.html", prediction=prediction, score=score, error=error)
 
     if request.method == "POST":
         image_url = request.form.get("image_url")
+        print("Received image_url:", image_url)
 
         try:
             params = {"visualFeatures": "Tags,Description,Objects", "language": "en"}
@@ -102,16 +114,18 @@ def index():
             result = response.json()
 
             tags = result.get("tags", [])
-            prediction, score, all_scores = predict_sport_from_tags(tags)
+            print("Tags from CV:", tags)
 
-            # 👉 Log to Azure Blob
+            prediction, score, all_scores = predict_sport_from_tags(tags)
+            print("Prediction:", prediction, "Score:", score)
+
             log_prediction_to_blob(image_url, prediction, score)
 
         except Exception as e:
             error = f"Error while calling Computer Vision API: {e}"
+            print("Exception:", e)
 
     return render_template("index.html", prediction=prediction, score=score, error=error)
-
 
 
 if __name__ == "__main__":
