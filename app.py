@@ -4,6 +4,9 @@ import os
 from azure.storage.blob import BlobServiceClient
 from datetime import datetime
 import pyodbc
+import uuid
+from urllib.parse import urlparse
+from azure.core.exceptions import ResourceExistsError
 
 
 app = Flask(__name__)
@@ -17,7 +20,8 @@ ENDPOINT = os.environ.get("CV_ENDPOINT")
 
 SQL_CONNECTION_STRING = os.environ.get("SQL_CONNECTION_STRING")
 
-def save_prediction_to_db(image_url, email, sport, score):
+def save_prediction_to_db(image_url, email, sport, score, blob_url):
+    """Insert one prediction row into Azure SQL Database, including blob URL."""
     if not SQL_CONNECTION_STRING:
         print("No SQL connection string configured, skipping DB save.")
         return
@@ -27,16 +31,18 @@ def save_prediction_to_db(image_url, email, sport, score):
         cursor = conn.cursor()
         cursor.execute(
             """
-            INSERT INTO Predictions (ImageUrl, Email, Sport, Score)
-            VALUES (?, ?, ?, ?)
+            INSERT INTO Predictions (ImageUrl, Email, Sport, Score.BlobUrl)
+            VALUES (?, ?, ?, ?, ?)
             """,
-            (image_url, email, sport, float(score))
+            (image_url, blob_url, email, sport, float(score))
         )
         conn.commit()
         cursor.close()
         conn.close()
+        print("Saved prediction to SQL DB with BlobUrl.")
     except Exception as e:
         print(f"Error saving prediction to SQL DB: {e}")
+
 
 
 if ENDPOINT:
@@ -51,6 +57,8 @@ else:
 #   STORAGE_CONTAINER_NAME = logs
 STORAGE_CONNECTION_STRING = os.environ.get("STORAGE_CONNECTION_STRING")
 STORAGE_CONTAINER_NAME = os.environ.get("STORAGE_CONTAINER_NAME", "logs")
+
+IMAGE_CONTAINER_NAME = os.environ.get("IMAGE_CONTAINER_NAME", "sport-images")
 
 blob_service_client = None
 blob_container_client = None
@@ -90,6 +98,48 @@ def log_prediction_to_blob(image_url, prediction, score):
     except Exception as e:
         print(f"Error logging to blob: {e}")
 
+def upload_image_to_blob_from_url(image_url):
+    """Download image from the given URL and upload it to Azure Blob Storage.
+       Returns the blob URL, or None if something failed.
+    """
+    if not blob_service_client:
+        print("Blob service not configured, cannot upload image.")
+        return None
+
+    # 1) Download the image bytes
+    try:
+        img_response = requests.get(image_url, timeout=10)
+        img_response.raise_for_status()
+        image_bytes = img_response.content
+        print(f"Downloaded image: {len(image_bytes)} bytes")
+    except Exception as e:
+        print(f"Error downloading image from URL: {e}")
+        return None
+
+    try:
+        # 2) Get / create the 'sport-images' container
+        image_container_client = blob_service_client.get_container_client(IMAGE_CONTAINER_NAME)
+        try:
+            image_container_client.create_container()
+            print(f"Created container '{IMAGE_CONTAINER_NAME}'")
+        except ResourceExistsError:
+            pass  # already exists
+
+        # 3) Generate a unique blob name
+        path = urlparse(image_url).path
+        ext = os.path.splitext(path)[1] or ".jpg"
+        blob_name = f"{uuid.uuid4()}{ext}"
+
+        blob_client = image_container_client.get_blob_client(blob_name)
+        blob_client.upload_blob(image_bytes, overwrite=True)
+        print(f"Uploaded image to blob: {blob_client.url}")
+
+        return blob_client.url
+    except Exception as e:
+        print(f"Error uploading image to Blob Storage: {e}")
+        return None
+
+
 
 def predict_sport_from_tags(tags):
     SPORT_KEYWORDS = {
@@ -126,8 +176,6 @@ def index():
     if request.method == "POST":
         image_url = request.form.get("image_url")
         print("Received image_url:", image_url)
-        email = request.form.get("email")
-        print("Received email:", email)
 
         try:
             params = {"visualFeatures": "Tags,Description,Objects", "language": "en"}
@@ -147,12 +195,31 @@ def index():
             prediction, score, all_scores = predict_sport_from_tags(tags)
             print("Prediction:", prediction, "Score:", score)
 
-            log_prediction_to_blob(image_url, prediction, score)
+            if request.method == "POST":
+                image_url = request.form.get("image_url")
+                email = request.form.get("email")
 
-            
+                try:
+                    # ... call Computer Vision, get tags, prediction, score ...
+
+                    prediction, score, all_scores = predict_sport_from_tags(tags)
+
+                    # 1) Upload the image to Blob and get blob URL
+                    blob_url = upload_image_to_blob_from_url(image_url)
+
+                    # 2) Log to Blob log file (optional, you already do this)
+                    log_prediction_to_blob(image_url, prediction, score)
+
+                    # 3) Save to SQL with blob URL
+                    save_prediction_to_db(image_url, blob_url, email, prediction, score)
+
+                except Exception as e:
+                    error = f"Error while calling Computer Vision API or saving to storage: {e}"
+
+
+        
             log_prediction_to_blob(image_url, prediction, score)
             save_prediction_to_db(image_url, email, prediction, score)
-            send_prediction_email(email, image_url, prediction, score)
 
 
         except Exception as e:
