@@ -31,7 +31,7 @@ def save_prediction_to_db(image_url, email, sport, score, blob_url):
         cursor = conn.cursor()
         cursor.execute(
             """
-            INSERT INTO Predictions (ImageUrl, Email, Sport, Score.BlobUrl)
+            INSERT INTO Predictions (ImageUrl, Email, Sport, Score,BlobUrl)
             VALUES (?, ?, ?, ?, ?)
             """,
             (image_url, blob_url, email, sport, float(score))
@@ -39,9 +39,9 @@ def save_prediction_to_db(image_url, email, sport, score, blob_url):
         conn.commit()
         cursor.close()
         conn.close()
-        print("Saved prediction to SQL DB with BlobUrl.")
+        print("✅Saved prediction to SQL DB with BlobUrl.")
     except Exception as e:
-        print(f"Error saving prediction to SQL DB: {e}")
+        print(f"❌Error saving prediction to SQL DB: {e}")
 
 
 
