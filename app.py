@@ -219,7 +219,7 @@ def index():
 
         
             log_prediction_to_blob(image_url, prediction, score)
-            save_prediction_to_db(image_url, email, prediction, score)
+            save_prediction_to_db(image_url, email, prediction, score,blob_url)
 
 
         except Exception as e:
