@@ -211,15 +211,11 @@ def index():
                     log_prediction_to_blob(image_url, prediction, score)
 
                     # 3) Save to SQL with blob URL
-                    save_prediction_to_db(image_url, blob_url, email, prediction, score)
+                    save_prediction_to_db(image_url, email, prediction, score, blob_url)
 
                 except Exception as e:
                     error = f"Error while calling Computer Vision API or saving to storage: {e}"
 
-
-        
-            log_prediction_to_blob(image_url, prediction, score)
-            save_prediction_to_db(image_url, email, prediction, score,blob_url)
 
 
         except Exception as e:
