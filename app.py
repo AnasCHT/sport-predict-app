@@ -3,6 +3,8 @@ import requests
 import os
 from azure.storage.blob import BlobServiceClient
 from datetime import datetime
+import pyodbc
+
 
 app = Flask(__name__)
 
@@ -12,6 +14,30 @@ app = Flask(__name__)
 #   CV_ENDPOINT = https://<your-resource>.cognitiveservices.azure.com/
 SUBSCRIPTION_KEY = os.environ.get("CV_KEY")
 ENDPOINT = os.environ.get("CV_ENDPOINT")
+
+SQL_CONNECTION_STRING = os.environ.get("SQL_CONNECTION_STRING")
+
+def save_prediction_to_db(image_url, email, sport, score):
+    if not SQL_CONNECTION_STRING:
+        print("No SQL connection string configured, skipping DB save.")
+        return
+
+    try:
+        conn = pyodbc.connect(SQL_CONNECTION_STRING)
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            INSERT INTO Predictions (ImageUrl, Email, Sport, Score)
+            VALUES (?, ?, ?, ?)
+            """,
+            (image_url, email, sport, float(score))
+        )
+        conn.commit()
+        cursor.close()
+        conn.close()
+    except Exception as e:
+        print(f"Error saving prediction to SQL DB: {e}")
+
 
 if ENDPOINT:
     ENDPOINT = ENDPOINT.rstrip("/")
@@ -100,6 +126,8 @@ def index():
     if request.method == "POST":
         image_url = request.form.get("image_url")
         print("Received image_url:", image_url)
+        email = request.form.get("email")
+        print("Received email:", email)
 
         try:
             params = {"visualFeatures": "Tags,Description,Objects", "language": "en"}
@@ -121,9 +149,17 @@ def index():
 
             log_prediction_to_blob(image_url, prediction, score)
 
+            
+            log_prediction_to_blob(image_url, prediction, score)
+            save_prediction_to_db(image_url, email, prediction, score)
+            send_prediction_email(email, image_url, prediction, score)
+
+
         except Exception as e:
             error = f"Error while calling Computer Vision API: {e}"
             print("Exception:", e)
+
+
 
     return render_template("index.html", prediction=prediction, score=score, error=error)
 
