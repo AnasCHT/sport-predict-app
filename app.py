@@ -31,17 +31,18 @@ def save_prediction_to_db(image_url, email, sport, score, blob_url):
         cursor = conn.cursor()
         cursor.execute(
             """
-            INSERT INTO Predictions (ImageUrl, Email, Sport, Score,BlobUrl)
+            INSERT INTO Predictions (ImageUrl, Email, Sport, Score, BlobUrl)
             VALUES (?, ?, ?, ?, ?)
             """,
-            (image_url, blob_url, email, sport, float(score))
+            (image_url, email, sport, float(score), blob_url)  
         )
         conn.commit()
         cursor.close()
         conn.close()
-        print("✅Saved prediction to SQL DB with BlobUrl.")
+        print("✅ Saved prediction to SQL DB with BlobUrl.")
     except Exception as e:
-        print(f"❌Error saving prediction to SQL DB: {e}")
+        print(f"❌ Error saving prediction to SQL DB: {e}")
+
 
 
 
@@ -166,7 +167,6 @@ def index():
     prediction = None
     score = None
 
-    # Debug print to Azure Log Stream
     print("Request method:", request.method)
 
     if not SUBSCRIPTION_KEY or not ANALYZE_URL:
@@ -175,7 +175,9 @@ def index():
 
     if request.method == "POST":
         image_url = request.form.get("image_url")
+        email = request.form.get("email")
         print("Received image_url:", image_url)
+        print("Received email:", email)
 
         try:
             params = {"visualFeatures": "Tags,Description,Objects", "language": "en"}
@@ -195,36 +197,21 @@ def index():
             prediction, score, all_scores = predict_sport_from_tags(tags)
             print("Prediction:", prediction, "Score:", score)
 
-            if request.method == "POST":
-                image_url = request.form.get("image_url")
-                email = request.form.get("email")
+            # 1) Upload the image to Blob and get blob URL
+            blob_url = upload_image_to_blob_from_url(image_url)
 
-                try:
-                    # ... call Computer Vision, get tags, prediction, score ...
+            # 2) Log to Blob log file
+            log_prediction_to_blob(image_url, prediction, score)
 
-                    prediction, score, all_scores = predict_sport_from_tags(tags)
-
-                    # 1) Upload the image to Blob and get blob URL
-                    blob_url = upload_image_to_blob_from_url(image_url)
-
-                    # 2) Log to Blob log file (optional, you already do this)
-                    log_prediction_to_blob(image_url, prediction, score)
-
-                    # 3) Save to SQL with blob URL
-                    save_prediction_to_db(image_url, email, prediction, score, blob_url)
-
-                except Exception as e:
-                    error = f"Error while calling Computer Vision API or saving to storage: {e}"
-
-
+            # 3) Save to SQL with blob URL
+            save_prediction_to_db(image_url, email, prediction, score, blob_url)
 
         except Exception as e:
-            error = f"Error while calling Computer Vision API: {e}"
+            error = f"Error while calling Computer Vision API or saving to storage: {e}"
             print("Exception:", e)
 
-
-
     return render_template("index.html", prediction=prediction, score=score, error=error)
+
 
 
 if __name__ == "__main__":
