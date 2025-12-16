@@ -2,3 +2,4 @@ Flask
 requests
 azure-storage-blob
 pyodbc
+azure-communication-email

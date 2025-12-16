@@ -7,6 +7,8 @@ import pyodbc
 import uuid
 from urllib.parse import urlparse
 from azure.core.exceptions import ResourceExistsError
+from azure.communication.email import EmailClient
+
 
 
 app = Flask(__name__)
@@ -140,7 +142,59 @@ def upload_image_to_blob_from_url(image_url):
         print(f"Error uploading image to Blob Storage: {e}")
         return None
 
+    ACS_CONNECTION_STRING = os.environ.get("ACS_CONNECTION_STRING")
+    ACS_SENDER_EMAIL = os.environ.get("ACS_SENDER_EMAIL")
 
+    email_client = None
+    if ACS_CONNECTION_STRING:
+        try:
+            email_client = EmailClient.from_connection_string(ACS_CONNECTION_STRING)
+            print("EmailClient initialized successfully.")
+        except Exception as e:
+            print(f"Error initializing EmailClient: {e}")
+
+
+    def send_prediction_email(to_email, image_url, prediction, score):
+        """Send an email with the prediction result using Azure Communication Services."""
+        if not email_client:
+            print("Email client not configured, skipping email send.")
+            return
+        if not ACS_SENDER_EMAIL:
+            print("No sender email configured, skipping email send.")
+            return
+        if not to_email:
+            print("No recipient email provided, skipping email send.")
+            return
+
+        subject = "Your Sport Prediction Result"
+        body_text = (
+            f"Hello,\n\n"
+            f"Here is the result of your image analysis:\n\n"
+            f"Image URL: {image_url}\n"
+            f"Predicted sport: {prediction}\n"
+            f"Confidence score: {score:.2f}\n\n"
+            f"Thank you for using the Sport-Type Image Classifier.\n"
+                    )
+
+        message = {
+            "senderAddress": ACS_SENDER_EMAIL,
+            "recipients": {
+                "to": [
+                    {"address": to_email}
+                ]
+            },
+            "content": {
+                "subject": subject,
+                "plainText": body_text
+            }
+        }
+
+        try:
+            poller = email_client.begin_send(message)
+            result = poller.result()
+            print(f"Email send status: {result['status']}")
+        except Exception as e:
+            print(f"Error sending email: {e}")
 
 def predict_sport_from_tags(tags):
     SPORT_KEYWORDS = {
@@ -205,6 +259,9 @@ def index():
 
             # 3) Save to SQL with blob URL
             save_prediction_to_db(image_url, email, prediction, score, blob_url)
+
+
+            send_prediction_email(email, image_url, prediction, score)
 
         except Exception as e:
             error = f"Error while calling Computer Vision API or saving to storage: {e}"
