@@ -1,34 +1,445 @@
 <!DOCTYPE html>
-<html>
-  <body>
-    <h1>Sport-Type Image Classifier</h1>
-   <form method="POST">
-  <label>Image URL:</label>
-  <input type="text" name="image_url" placeholder="https://..." required>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Sport Image Classifier</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+        :root {
+            --bg: #0f172a;
+            --card-bg: #111827;
+            --accent: #3b82f6;
+            --accent-soft: rgba(59, 130, 246, 0.15);
+            --danger: #ef4444;
+            --text-main: #f9fafb;
+            --text-muted: #9ca3af;
+            --border-soft: #1f2937;
+            --radius-lg: 18px;
+            --radius-sm: 10px;
+        }
 
-  <br><br>
+        * {
+            box-sizing: border-box;
+            font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        }
 
-  <label>Your email (to receive the result):</label>
-  <input type="email" name="email" placeholder="you@example.com">
+        body {
+            margin: 0;
+            min-height: 100vh;
+            background: radial-gradient(circle at top, #1f2937 0, #020617 40%, #000 100%);
+            color: var(--text-main);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 32px 12px;
+        }
 
-  <br><br>
+        .app-shell {
+            width: 100%;
+            max-width: 960px;
+            background: linear-gradient(145deg, rgba(15,23,42,0.98), rgba(15,23,42,0.96));
+            border-radius: 28px;
+            border: 1px solid rgba(148,163,184,0.2);
+            box-shadow:
+                0 40px 80px rgba(0,0,0,0.7),
+                0 0 0 1px rgba(15,23,42,0.6);
+            padding: 24px 26px 28px;
+        }
 
-  <button type="submit">Analyze</button>
-</form>
+        .app-header {
+            display: flex;
+            justify-content: space-between;
+            gap: 16px;
+            align-items: flex-start;
+            margin-bottom: 20px;
+        }
 
-{% if error %}
-  <p style="color:red">{{ error }}</p>
-{% endif %}
+        .title-block h1 {
+            margin: 0 0 6px;
+            font-size: 1.7rem;
+            letter-spacing: 0.02em;
+        }
 
-{% if prediction %}
-  <p>Predicted sport: <strong>{{ prediction }}</strong></p>
-  <p>Confidence: {{ score }}</p>
-{% endif %}
+        .title-block p {
+            margin: 0;
+            font-size: 0.92rem;
+            color: var(--text-muted);
+        }
 
+        .pill {
+            padding: 6px 12px;
+            border-radius: 999px;
+            border: 1px solid rgba(148,163,184,0.35);
+            color: var(--text-muted);
+            font-size: 0.78rem;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            background: radial-gradient(circle at top, rgba(148,163,184,0.08), transparent);
+        }
 
-    {% if prediction %}
-      <h2>Predicted sport: {{ prediction }}</h2>
-      <p>Confidence: {{ (score * 100)|round(2) }} %</p>
-    {% endif %}
-  </body>
+        .pill-dot {
+            width: 7px;
+            height: 7px;
+            border-radius: 999px;
+            background: #22c55e;
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: minmax(0, 1.1fr) minmax(0, 1.2fr);
+            gap: 20px;
+        }
+
+        @media (max-width: 800px) {
+            .grid {
+                grid-template-columns: minmax(0, 1fr);
+            }
+            .app-shell {
+                padding: 18px 18px 22px;
+            }
+        }
+
+        .card {
+            background: radial-gradient(circle at top left, rgba(15,118,255,0.08), transparent 55%),
+                        radial-gradient(circle at bottom right, rgba(56,189,248,0.08), transparent 55%),
+                        var(--card-bg);
+            border-radius: var(--radius-lg);
+            border: 1px solid var(--border-soft);
+            padding: 18px 18px 16px;
+        }
+
+        .card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 12px;
+        }
+
+        .card-header h2 {
+            margin: 0;
+            font-size: 1.02rem;
+        }
+
+        .badge {
+            padding: 4px 9px;
+            border-radius: 999px;
+            background: var(--accent-soft);
+            color: #bfdbfe;
+            font-size: 0.75rem;
+            border: 1px solid rgba(59,130,246,0.45);
+        }
+
+        label {
+            display: block;
+            font-size: 0.83rem;
+            color: var(--text-muted);
+            margin-bottom: 4px;
+        }
+
+        input[type="url"],
+        input[type="email"] {
+            width: 100%;
+            border-radius: 999px;
+            border: 1px solid rgba(51,65,85,0.9);
+            background: rgba(15,23,42,0.95);
+            color: var(--text-main);
+            padding: 9px 12px;
+            font-size: 0.88rem;
+            outline: none;
+        }
+
+        input[type="url"]:focus,
+        input[type="email"]:focus {
+            border-color: var(--accent);
+            box-shadow: 0 0 0 1px rgba(59,130,246,0.35);
+        }
+
+        .field {
+            margin-bottom: 10px;
+        }
+
+        .hint {
+            font-size: 0.77rem;
+            color: var(--text-muted);
+            margin-top: 4px;
+        }
+
+        .btn-row {
+            display: flex;
+            gap: 10px;
+            margin-top: 6px;
+            flex-wrap: wrap;
+        }
+
+        button {
+            border: none;
+            cursor: pointer;
+            font-size: 0.9rem;
+            border-radius: 999px;
+            padding: 8px 16px;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            font-weight: 500;
+        }
+
+        .btn-primary {
+            background: linear-gradient(120deg, #3b82f6, #38bdf8);
+            color: #eff6ff;
+            box-shadow: 0 12px 25px rgba(59,130,246,0.45);
+        }
+
+        .btn-primary:hover {
+            filter: brightness(1.08);
+        }
+
+        .btn-outline {
+            background: transparent;
+            color: #e5e7eb;
+            border: 1px solid rgba(148,163,184,0.6);
+        }
+
+        .btn-outline:hover {
+            background: rgba(15,23,42,0.7);
+        }
+
+        .result-card {
+            margin-top: 4px;
+            padding: 12px 13px;
+            border-radius: var(--radius-lg);
+            background: rgba(22,163,74,0.07);
+            border: 1px solid rgba(34,197,94,0.3);
+        }
+
+        .result-title {
+            font-size: 0.9rem;
+            color: #bbf7d0;
+            margin-bottom: 2px;
+        }
+
+        .result-main {
+            font-size: 1.1rem;
+            font-weight: 600;
+        }
+
+        .result-meta {
+            font-size: 0.8rem;
+            color: #bbf7d0;
+            margin-top: 2px;
+        }
+
+        .error-card {
+            margin-top: 4px;
+            padding: 10px 12px;
+            border-radius: var(--radius-lg);
+            background: rgba(239,68,68,0.08);
+            border: 1px solid rgba(248,113,113,0.4);
+            font-size: 0.85rem;
+            color: #fecaca;
+        }
+
+        .history-table-wrapper {
+            margin-top: 6px;
+            max-height: 260px;
+            overflow: auto;
+            border-radius: var(--radius-lg);
+            border: 1px solid var(--border-soft);
+            background: rgba(15,23,42,0.9);
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.8rem;
+        }
+
+        thead {
+            position: sticky;
+            top: 0;
+            background: #020617;
+        }
+
+        th, td {
+            padding: 7px 10px;
+            text-align: left;
+            border-bottom: 1px solid rgba(31,41,55,0.9);
+        }
+
+        th {
+            font-weight: 500;
+            color: var(--text-muted);
+        }
+
+        tbody tr:last-child td {
+            border-bottom: none;
+        }
+
+        tbody tr:hover {
+            background: rgba(15,23,42,0.85);
+        }
+
+        .pill-sport {
+            padding: 2px 7px;
+            border-radius: 999px;
+            background: rgba(59,130,246,0.15);
+            border: 1px solid rgba(59,130,246,0.35);
+            font-size: 0.75rem;
+        }
+
+        .score-badge {
+            font-variant-numeric: tabular-nums;
+        }
+
+        a.link {
+            color: #93c5fd;
+            text-decoration: none;
+        }
+        a.link:hover {
+            text-decoration: underline;
+        }
+
+        .footer {
+            margin-top: 16px;
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            display: flex;
+            justify-content: space-between;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+    </style>
+</head>
+<body>
+
+<div class="app-shell">
+    <div class="app-header">
+        <div class="title-block">
+            <h1>Sport-Type Image Classifier</h1>
+            <p>Paste an image URL, get the detected sport, store everything in Azure &amp; receive an email.</p>
+        </div>
+        <div class="pill">
+            <span class="pill-dot"></span>
+            <span>Azure Cloud • Student Project</span>
+        </div>
+    </div>
+
+    <div class="grid">
+        <!-- LEFT: FORM + RESULT -->
+        <div class="card">
+            <div class="card-header">
+                <h2>Analyze a new image</h2>
+                <span class="badge">Computer Vision • Blob • SQL • Email</span>
+            </div>
+
+            <form method="post" action="/">
+                <div class="field">
+                    <label for="image_url">Image URL</label>
+                    <input type="url"
+                           id="image_url"
+                           name="image_url"
+                           placeholder="https://example.com/my-sport-image.jpg"
+                           required
+                           value="{{ request.form.image_url or '' }}">
+                    <div class="hint">Image must be publicly accessible (no Google Drive / private links).</div>
+                </div>
+
+                <div class="field">
+                    <label for="email">Email address</label>
+                    <input type="email"
+                           id="email"
+                           name="email"
+                           placeholder="you@example.com"
+                           required
+                           value="{{ request.form.email or '' }}">
+                    <div class="hint">We’ll send the prediction result to this address.</div>
+                </div>
+
+                <div class="btn-row">
+                    <button type="submit" class="btn-primary">
+                        🔍 Analyze image
+                    </button>
+                </div>
+            </form>
+
+            {% if prediction %}
+            <div class="result-card">
+                <div class="result-title">Prediction</div>
+                <div class="result-main">{{ prediction }}</div>
+                <div class="result-meta">
+                    Confidence score:
+                    <span class="score-badge">{{ '%.2f' % score }}</span>
+                </div>
+            </div>
+            {% endif %}
+
+            {% if error %}
+            <div class="error-card">
+                ⚠️ {{ error }}
+            </div>
+            {% endif %}
+        </div>
+
+        <!-- RIGHT: HISTORY -->
+        <div class="card">
+            <div class="card-header">
+                <h2>Prediction history</h2>
+                <span class="badge">From Azure SQL Database</span>
+            </div>
+
+            <form method="get" action="/history">
+                <div class="btn-row">
+                    <button type="submit" class="btn-outline">
+                        📜 View last predictions
+                    </button>
+                </div>
+            </form>
+
+            {% if history %}
+            <div class="history-table-wrapper">
+                <table>
+                    <thead>
+                    <tr>
+                        <th>Date (UTC)</th>
+                        <th>Email</th>
+                        <th>Sport</th>
+                        <th>Score</th>
+                        <th>Image</th>
+                    </tr>
+                    </thead>
+                    <tbody>
+                    {% for row in history %}
+                        <tr>
+                            <td>{{ row.created_at }}</td>
+                            <td>{{ row.email }}</td>
+                            <td><span class="pill-sport">{{ row.sport }}</span></td>
+                            <td class="score-badge">{{ '%.2f' % row.score }}</td>
+                            <td>
+                                {% if row.blob_url %}
+                                    <a class="link" href="{{ row.blob_url }}" target="_blank">Blob</a>
+                                {% else %}
+                                    <a class="link" href="{{ row.image_url }}" target="_blank">Source</a>
+                                {% endif %}
+                            </td>
+                        </tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% else %}
+            <p class="hint" style="margin-top: 10px;">
+                Click “View last predictions” to load the latest entries from the SQL database.
+            </p>
+            {% endif %}
+        </div>
+    </div>
+
+    <div class="footer">
+        <span>Back-end: Flask • Azure Computer Vision • Blob Storage • SQL • Email.</span>
+        <span>Front-end: Single-page UI with Tailwind-style custom CSS.</span>
+    </div>
+</div>
+
+</body>
 </html>
+

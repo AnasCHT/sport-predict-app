@@ -196,23 +196,136 @@ def send_prediction_email(to_email, image_url, prediction, score):
     except Exception as e:
         print(f"Error sending email: {e}")
 
+def get_predictions_history(limit=50):
+    """Return the last `limit` predictions from the SQL table as a list of dicts."""
+    records = []
+
+    if not SQL_CONNECTION_STRING:
+        print("No SQL connection string configured, cannot load history.")
+        return records
+
+    try:
+        conn = pyodbc.connect(SQL_CONNECTION_STRING)
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT TOP (?) CreatedAt, Email, ImageUrl, BlobUrl, Sport, Score
+            FROM Predictions
+            ORDER BY CreatedAt DESC
+            """,
+            (limit,)
+        )
+        rows = cursor.fetchall()
+
+        for r in rows:
+            records.append({
+                "created_at": r.CreatedAt,
+                "email": r.Email,
+                "image_url": r.ImageUrl,
+                "blob_url": r.BlobUrl,
+                "sport": r.Sport,
+                "score": float(r.Score),
+            })
+
+        cursor.close()
+        conn.close()
+    except Exception as e:
+        print("Error loading history from SQL:", e)
+
+    return records
+
+
 def predict_sport_from_tags(tags):
+    # Expanded list of sports + keywords that are likely to appear
+    # in Azure Computer Vision tags / descriptions.
     SPORT_KEYWORDS = {
-        "Football": ["soccer", "football", "football player", "soccer ball"],
-        "Basketball": ["basketball", "basketball player", "basketball court"],
-        "Tennis": ["tennis", "tennis racket", "tennis court"],
-        "Swimming": ["swimming", "swimmer", "swimming pool"],
-        "Athletics": ["running", "runner", "track", "athletics"],
+        "Football (Soccer)": [
+            "soccer", "football", "soccer ball", "football player",
+            "soccer player", "goalkeeper", "goal post", "football stadium"
+        ],
+        "Basketball": [
+            "basketball", "basketball player", "basketball court",
+            "basketball hoop", "basketball uniform"
+        ],
+        "Tennis": [
+            "tennis", "tennis player", "tennis racket",
+            "tennis court", "tennis ball"
+        ],
+        "Swimming": [
+            "swimming", "swimmer", "swimming pool",
+            "swimwear", "diving platform"
+        ],
+        "Athletics / Running": [
+            "running", "runner", "track", "athletics",
+            "sprinter", "hurdles", "relay race", "marathon"
+        ],
+        "Volleyball": [
+            "volleyball", "volleyball player", "volleyball net",
+            "beach volleyball"
+        ],
+        "Rugby": [
+            "rugby", "rugby ball", "rugby player"
+        ],
+        "Baseball": [
+            "baseball", "baseball bat", "baseball glove",
+            "baseball player", "baseball field"
+        ],
+        "Cricket": [
+            "cricket", "cricket bat", "cricket player",
+            "cricket ball", "wicket"
+        ],
+        "American Football": [
+            "american football", "football helmet",
+            "american football player", "football pads", "nfl"
+        ],
+        "Golf": [
+            "golf", "golf course", "golf club", "golfer",
+        ],
+        "Boxing": [
+            "boxing", "boxer", "boxing ring", "boxing gloves"
+        ],
+        "Martial Arts / MMA": [
+            "martial arts", "karate", "judo", "taekwondo",
+            "mma", "mixed martial arts", "kickboxing"
+        ],
+        "Cycling": [
+            "cycling", "cyclist", "bicycle race",
+            "bike race", "mountain biking", "road cycling"
+        ],
+        "Ski / Snowboard": [
+            "skiing", "skier", "ski slope", "snowboard", "snowboarding"
+        ],
+        "Surfing": [
+            "surfing", "surfer", "surfboard", "wave riding"
+        ],
+        "Gymnastics": [
+            "gymnastics", "gymnast", "balance beam",
+            "uneven bars", "pommel horse", "floor exercise"
+        ],
+        "Ice Hockey": [
+            "ice hockey", "hockey stick", "hockey player",
+            "hockey puck", "ice rink"
+        ],
     }
+
+    # Initialize scores
     scores = {sport: 0.0 for sport in SPORT_KEYWORDS}
+
+    # Go through all returned tags from Computer Vision
     for tag in tags:
         name = tag["name"].lower()
         conf = tag.get("confidence", 0.0)
+
         for sport, keywords in SPORT_KEYWORDS.items():
-            if name in keywords:
-                scores[sport] = max(scores[sport], conf)
+            for kw in keywords:
+                # Use substring match so "soccer player" matches "soccer", etc.
+                if kw in name:
+                    scores[sport] = max(scores[sport], conf)
+
+    # Choose the sport with the highest score
     best_sport = max(scores, key=scores.get)
     return best_sport, scores[best_sport], scores
+
 
 
 @app.route("/", methods=["GET", "POST"])
@@ -225,7 +338,7 @@ def index():
 
     if not SUBSCRIPTION_KEY or not ANALYZE_URL:
         error = "Computer Vision credentials are not configured correctly on the server."
-        return render_template("index.html", prediction=prediction, score=score, error=error)
+        return render_template("index.html", prediction=prediction, score=score, error=error, history=None)
 
     if request.method == "POST":
         image_url = request.form.get("image_url")
@@ -267,9 +380,29 @@ def index():
             error = f"Error while calling Computer Vision API or saving to storage: {e}"
             print("Exception:", e)
 
-    return render_template("index.html", prediction=prediction, score=score, error=error)
+    return render_template("index.html", prediction=prediction, score=score, error=error, history=None)
 
 
+
+@app.route("/history", methods=["GET"])
+def history():
+    error = None
+    history = []
+
+    try:
+        history = get_predictions_history(limit=50)
+    except Exception as e:
+        error = f"Error loading history from database: {e}"
+        print(error)
+
+    # We reuse the same index.html, just without a prediction
+    return render_template(
+        "index.html",
+        prediction=None,
+        score=None,
+        error=error,
+        history=history,
+    )
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=8080, debug=True)
