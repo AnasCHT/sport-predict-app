@@ -8,6 +8,8 @@ import uuid
 from urllib.parse import urlparse
 from azure.core.exceptions import ResourceExistsError
 from azure.communication.email import EmailClient
+import mimetypes
+from azure.storage.blob import ContentSettings
 
 
 
@@ -102,45 +104,49 @@ def log_prediction_to_blob(image_url, prediction, score):
         print(f"Error logging to blob: {e}")
 
 def upload_image_to_blob_from_url(image_url):
-    """Download image from the given URL and upload it to Azure Blob Storage.
-       Returns the blob URL, or None if something failed.
-    """
-    if not blob_service_client:
-        print("Blob service not configured, cannot upload image.")
-        return None
-
-    # 1) Download the image bytes
-    try:
-        img_response = requests.get(image_url, timeout=10)
-        img_response.raise_for_status()
-        image_bytes = img_response.content
-        print(f"Downloaded image: {len(image_bytes)} bytes")
-    except Exception as e:
-        print(f"Error downloading image from URL: {e}")
+    if not blob_service_client or not IMAGE_CONTAINER_NAME:
         return None
 
     try:
-        # 2) Get / create the 'sport-images' container
-        image_container_client = blob_service_client.get_container_client(IMAGE_CONTAINER_NAME)
+        container_client = blob_service_client.get_container_client(IMAGE_CONTAINER_NAME)
+
+        # Create container if it does not exist
         try:
-            image_container_client.create_container()
-            print(f"Created container '{IMAGE_CONTAINER_NAME}'")
-        except ResourceExistsError:
-            pass  # already exists
+            container_client.create_container()
+        except Exception:
+            pass  # probably already exists
 
-        # 3) Generate a unique blob name
-        path = urlparse(image_url).path
-        ext = os.path.splitext(path)[1] or ".jpg"
-        blob_name = f"{uuid.uuid4()}{ext}"
+        # Get image bytes from the URL
+        response = requests.get(image_url, stream=True)
+        response.raise_for_status()
+        image_bytes = response.content
 
-        blob_client = image_container_client.get_blob_client(blob_name)
-        blob_client.upload_blob(image_bytes, overwrite=True)
-        print(f"Uploaded image to blob: {blob_client.url}")
+        # Choose a blob name
+        timestamp = datetime.utcnow().strftime("%Y%m%d%H%M%S%f")
+        extension = os.path.splitext(image_url.split("?")[0])[1] or ".jpg"
+        blob_name = f"image_{timestamp}{extension}"
+
+        blob_client = container_client.get_blob_client(blob_name)
+
+        # Detect content type (from HTTP header or from file extension)
+        content_type = (
+            response.headers.get("Content-Type")
+            or mimetypes.guess_type(image_url)[0]
+            or "image/jpeg"
+        )
+
+        blob_client.upload_blob(
+            image_bytes,
+            overwrite=True,
+            content_settings=ContentSettings(content_type=content_type),
+        )
 
         return blob_client.url
+
     except Exception as e:
         print(f"Error uploading image to Blob Storage: {e}")
         return None
+
 
 ACS_CONNECTION_STRING = os.environ.get("ACS_CONNECTION_STRING")
 ACS_SENDER_EMAIL = os.environ.get("ACS_SENDER_EMAIL")
